@@ -3,7 +3,7 @@ import asyncpg
 DB_CONFIG = {
     "user": "postgres",
     "password": "YtMine-Yyura",
-    "database": "Database.py",   # ✅ ИСПРАВИЛИ
+    "database": "postgres",   # ✅ ИСПРАВИЛИ
     "host": "127.0.0.1",
     "port": 5432
 }
