@@ -91,6 +91,8 @@ async def start_handler(message: Message):
     # меню
     builder = InlineKeyboardBuilder()
     builder.button(text="🧑 Профиль", callback_data="press")
+    builder.button(text="⛪ смотреть клубы", callback_data="press")
+    builder.button(text="⛪ создать клуб", callback_data="press")
     builder.button(text="👥 Друзья", callback_data="press")
     builder.button(text="📅 События", callback_data="press")
     builder.button(text="⚔️ Битвы", callback_data="press")
@@ -116,6 +118,11 @@ async def create_event_button(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("🎮 Введи игру:")
     await state.set_state(CreateEvent.game)
     await callback.answer()
+
+@dp.callback_query(F.data == "create_club")
+async def create_event_button(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("⛪ Введи название клуба:")
+
 
 
 # ===== FSM шаги =====
