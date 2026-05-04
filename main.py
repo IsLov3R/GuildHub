@@ -11,7 +11,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from database import create_pool, create_tables, execute, fetchrow
+from database import create_pool, create_tables, execute, fetchrow, fetch
 
 TOKEN = "8592688032:AAFroY0M7X47fGUMsXH1jqraU8MP4ATxhlQ"
 
@@ -27,7 +27,12 @@ class CreateEvent(StatesGroup):
     description = State()
 
 
-# ===== /start + регистрация + invite =====
+class CreateClub(StatesGroup):
+    name = State()
+    description = State()
+
+
+# ===== /start =====
 @dp.message(Command("start"))
 async def start_handler(message: Message):
     args = message.text.split()
@@ -48,51 +53,11 @@ async def start_handler(message: Message):
     else:
         await message.answer("С возвращением 👋")
 
-    # invite
-    if len(args) > 1:
-        code = args[1]
-
-        invite = await fetchrow(
-            "SELECT * FROM invites WHERE code = $1",
-            code
-        )
-
-        if invite:
-            if invite["expires_at"] and invite["expires_at"] < datetime.now():
-                await message.answer("Инвайт истёк ❌")
-                return
-
-            if invite["uses"] >= invite["max_uses"]:
-                await message.answer("Инвайт закончился ❌")
-                return
-
-            await execute(
-                "UPDATE invites SET uses = uses + 1 WHERE code = $1",
-                code
-            )
-
-            if invite["type"] == "club":
-                await execute("""
-                INSERT INTO club_members (user_id, club_id)
-                VALUES ($1, $2)
-                """, message.from_user.id, invite["target_id"])
-
-                await message.answer("Ты вступил в клуб ✅")
-
-            elif invite["type"] == "friend":
-                await message.answer("Ты добавлен в друзья 🤝")
-
-            elif invite["type"] == "battle":
-                await message.answer("Ты вступил в бой ⚔️")
-
-        else:
-            await message.answer("Неверный код ❌")
-
     # меню
     builder = InlineKeyboardBuilder()
     builder.button(text="🧑 Профиль", callback_data="press")
-    builder.button(text="⛪ смотреть клубы", callback_data="press")
-    builder.button(text="⛪ создать клуб", callback_data="press")
+    builder.button(text="⛪ Смотреть клубы", callback_data="clubs")
+    builder.button(text="⛪ Создать клуб", callback_data="create_club")
     builder.button(text="👥 Друзья", callback_data="press")
     builder.button(text="📅 События", callback_data="press")
     builder.button(text="⚔️ Битвы", callback_data="press")
@@ -112,20 +77,135 @@ async def press_handler(callback: CallbackQuery):
     await callback.answer()
 
 
-# ===== кнопка создания ивента =====
+# ===== КЛУБЫ =====
+
+# создание клуба
+@dp.callback_query(F.data == "create_club")
+async def create_club_start(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("⛪ Введи название клуба:")
+    await state.set_state(CreateClub.name)
+    await callback.answer()
+
+
+@dp.message(CreateClub.name)
+async def club_name(message: Message, state: FSMContext):
+    await state.update_data(name=message.text)
+    await message.answer("📝 Введи описание клуба:")
+    await state.set_state(CreateClub.description)
+
+
+@dp.message(CreateClub.description)
+async def club_description(message: Message, state: FSMContext):
+    data = await state.get_data()
+
+    club = await fetchrow("""
+    INSERT INTO clubs (name, description, owner_id)
+    VALUES ($1, $2, $3)
+    RETURNING id
+    """,
+    data["name"],
+    message.text,
+    message.from_user.id
+    )
+
+    # владелец автоматически вступает
+    await execute("""
+    INSERT INTO club_members (user_id, club_id)
+    VALUES ($1, $2)
+    """, message.from_user.id, club["id"])
+
+    await message.answer(f"Клуб создан ✅\nНазвание: {data['name']}")
+    await state.clear()
+
+
+# список клубов
+@dp.callback_query(F.data == "clubs")
+async def show_clubs(callback: CallbackQuery):
+    clubs = await fetch("SELECT * FROM clubs")
+
+    if not clubs:
+        await callback.message.answer("Клубов пока нет ❌")
+        await callback.answer()
+        return
+
+    builder = InlineKeyboardBuilder()
+
+    for club in clubs:
+        builder.button(
+            text=club["name"],
+            callback_data=f"club_{club['id']}"
+        )
+
+    builder.adjust(1)
+
+    await callback.message.answer("⛪ Список клубов:", reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+# открыть клуб
+@dp.callback_query(F.data.startswith("club_"))
+async def open_club(callback: CallbackQuery):
+    club_id = int(callback.data.split("_")[1])
+
+    club = await fetchrow("SELECT * FROM clubs WHERE id = $1", club_id)
+
+    if not club:
+        await callback.answer("Клуб не найден ❌")
+        return
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Вступить", callback_data=f"join_{club_id}")
+    builder.button(text=" ➖ Не вступать", callback_data=f"leave"{club_id}")
+
+    builder.adjust(2)
+
+    await callback.message.answer(
+        f"⛪ {club['name']}\n📝 {club['description']}",
+        reply_markup=builder.as_markup()
+    )
+
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("leave_"))
+async def join_club(callback: CallbackQuery):
+    club_id = int(callback.data.split("_")[1])
+
+# вступить в клуб
+@dp.callback_query(F.data.startswith("join_"))
+async def join_club(callback: CallbackQuery):
+    club_id = int(callback.data.split("_")[1])
+
+    await execute("""
+    INSERT INTO club_members (user_id, club_id)
+    VALUES ($1, $2)
+    ON CONFLICT DO NOTHING
+    """, callback.from_user.id, club_id)
+
+    await callback.answer("Ты вступил в клуб ✅")
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🧑 Профиль", callback_data="press")
+    builder.button(text="⛪ Смотреть клубы", callback_data="clubs")
+    builder.button(text="⛪ Создать клуб", callback_data="create_club")
+    builder.button(text="👥 Друзья", callback_data="press")
+    builder.button(text="📅 События", callback_data="press")
+    builder.button(text="⚔️ Битвы", callback_data="press")
+    builder.button(text="🏆 Рейтинг", callback_data="press")
+    builder.button(text="🧺 Маркет", callback_data="press")
+    builder.button(text="⚙️ Настройки", callback_data="press")
+    builder.button(text="🎮 Создать ивент", callback_data="create_event")
+    builder.adjust(2)
+
+    await callback.message.answer("Выбери категорию", reply_markup=builder.as_markup())
+
+# ===== СОБЫТИЯ =====
 @dp.callback_query(F.data == "create_event")
 async def create_event_button(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("🎮 Введи игру:")
     await state.set_state(CreateEvent.game)
     await callback.answer()
 
-@dp.callback_query(F.data == "create_club")
-async def create_event_button(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("⛪ Введи название клуба:")
 
-
-
-# ===== FSM шаги =====
 @dp.message(CreateEvent.game)
 async def event_game(message: Message, state: FSMContext):
     await state.update_data(game=message.text)
@@ -167,7 +247,6 @@ async def event_description(message: Message, state: FSMContext):
     message.text
     )
 
-    # RSVP кнопки
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Иду", callback_data=f"go_{event['id']}")
     builder.button(text="❌ Не иду", callback_data=f"no_{event['id']}")
@@ -182,7 +261,7 @@ async def event_description(message: Message, state: FSMContext):
     await state.clear()
 
 
-# ===== RSVP =====
+# RSVP
 @dp.callback_query(F.data.startswith("go_"))
 async def rsvp_go(callback: CallbackQuery):
     event_id = int(callback.data.split("_")[1])
@@ -225,20 +304,18 @@ async def rsvp_maybe(callback: CallbackQuery):
     await callback.answer("Под вопросом ❓")
 
 
-# ===== фото =====
+# ===== прочее =====
 @dp.message(F.photo)
 async def photo_handler(message: Message):
     await message.reply("Привет! Я асинхронный бот 🤖")
 
 
-# ===== /pic =====
 @dp.message(Command("pic"))
 async def send_image(message: Message):
     photo = FSInputFile("синема.jpg")
     await message.answer_photo(photo, caption="Вот твоя картинка!")
 
 
-# ===== echo =====
 @dp.message()
 async def echo_handler(message: Message):
     if message.text and message.text.lower() == "привет":

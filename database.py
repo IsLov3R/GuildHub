@@ -20,6 +20,9 @@ async def execute(query, *args):
     async with pool.acquire() as conn:
         await conn.execute(query, *args)
 
+async def fetch(query, *args):
+    async with pool.acquire() as conn:
+        return await conn.fetch(query, *args)
 
 async def fetchrow(query, *args):
     async with pool.acquire() as conn:
@@ -33,16 +36,6 @@ async def create_tables():
         id SERIAL PRIMARY KEY,
         telegram_id BIGINT UNIQUE,
         username TEXT
-    );
-    """)
-
-    # clubs
-    await execute("""
-    CREATE TABLE IF NOT EXISTS clubs (
-        id SERIAL PRIMARY KEY,
-        name TEXT,
-        owner_id BIGINT,
-        max_players INTEGER
     );
     """)
 
@@ -90,4 +83,13 @@ async def create_tables():
         status TEXT,
         UNIQUE(event_id, user_id)
     );
+    """)
+
+    await execute("""
+    CREATE TABLE IF NOT EXISTS clubs (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        owner_id BIGINT
+    )
     """)
