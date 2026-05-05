@@ -155,7 +155,7 @@ async def open_club(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(text="➕ Вступить", callback_data=f"join_{club_id}")
-    builder.button(text=" ➖ Не вступать", callback_data=f"leave"{club_id}")
+    builder.button(text=" ➖ Не вступать", callback_data=f"join_{club_id}")
 
     builder.adjust(2)
 
@@ -166,9 +166,6 @@ async def open_club(callback: CallbackQuery):
 
     await callback.answer()
 
-@dp.callback_query(F.data.startswith("leave_"))
-async def join_club(callback: CallbackQuery):
-    club_id = int(callback.data.split("_")[1])
 
 # вступить в клуб
 @dp.callback_query(F.data.startswith("join_"))
