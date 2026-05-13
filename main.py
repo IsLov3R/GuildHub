@@ -77,6 +77,10 @@ async def press_handler(callback: CallbackQuery):
     await callback.message.answer("Ты нажал кнопку!")
     await callback.answer()
 
+@dp.callback_query(F.data == "back_start")
+async def back_to_start(callback: CallbackQuery):
+    await start_handler(callback.message)
+    await callback.answer()
 
 @dp.callback_query(F.data == "cobity")
 async def show_cobity(callback: CallbackQuery):
@@ -147,7 +151,7 @@ async def show_clubs(callback: CallbackQuery):
 
     for club in clubs:
         builder.button(text=club["name"], callback_data=f"club_{club['id']}")
-
+        builder.button(text="❌ назад", callback_data=f"back_start")
     builder.adjust(1)
 
     await callback.message.answer("⛪ Список клубов:", reply_markup=builder.as_markup())
