@@ -6,7 +6,6 @@ from aiogram.types import Message, FSInputFile, CallbackQuery
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# FSM
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -14,6 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from database import create_pool, create_tables, execute, fetchrow, fetch
 
 TOKEN = "8592688032:AAFroY0M7X47fGUMsXH1jqraU8MP4ATxhlQ"
+ADMIN_PASSWORD = "12345"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -32,12 +32,13 @@ class CreateClub(StatesGroup):
     description = State()
 
 
+class AdminPassword(StatesGroup):
+    password = State()
+
+
 # ===== /start =====
 @dp.message(Command("start"))
 async def start_handler(message: Message):
-    args = message.text.split()
-
-    # регистрация
     user = await fetchrow(
         "SELECT * FROM users WHERE telegram_id = $1",
         message.from_user.id
@@ -53,15 +54,15 @@ async def start_handler(message: Message):
     else:
         await message.answer("С возвращением 👋")
 
-    # меню
     builder = InlineKeyboardBuilder()
     builder.button(text="🧑 Профиль", callback_data="press")
     builder.button(text="⛪ Смотреть клубы", callback_data="clubs")
     builder.button(text="⛪ Создать клуб", callback_data="create_club")
     builder.button(text="👥 Друзья", callback_data="press")
     builder.button(text="📅 События", callback_data="press")
-    builder.button(text="⚔️ Битвы", callback_data="press")
-    builder.button(text="🏆 Рейтинг", callback_data="press")
+    builder.button(text="📅 Смотреть события", callback_data="cobity")
+    builder.button(text="⚔️ Битвы", callback_data="events_list")
+    builder.button(text="🏆 Рейтинг", callback_data="rating")
     builder.button(text="🧺 Маркет", callback_data="press")
     builder.button(text="⚙️ Настройки", callback_data="press")
     builder.button(text="🎮 Создать ивент", callback_data="create_event")
@@ -77,9 +78,22 @@ async def press_handler(callback: CallbackQuery):
     await callback.answer()
 
 
-# ===== КЛУБЫ =====
+@dp.callback_query(F.data == "cobity")
+async def show_cobity(callback: CallbackQuery):
+    events = await fetch("SELECT * FROM events ORDER BY id DESC")
 
-# создание клуба
+    builder = InlineKeyboardBuilder()
+
+    for event in events:
+        builder.button(text=f"🎮 {event['game']}", callback_data=f"event_{event['id']}")
+
+    builder.adjust(1)
+
+    await callback.message.answer("⚔️ Ивенты:", reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+# ===== КЛУБЫ =====
 @dp.callback_query(F.data == "create_club")
 async def create_club_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("⛪ Введи название клуба:")
@@ -108,17 +122,18 @@ async def club_description(message: Message, state: FSMContext):
     message.from_user.id
     )
 
-    # владелец автоматически вступает
     await execute("""
     INSERT INTO club_members (user_id, club_id)
     VALUES ($1, $2)
-    """, message.from_user.id, club["id"])
+    """,
+    message.from_user.id,
+    club["id"]
+    )
 
     await message.answer(f"Клуб создан ✅\nНазвание: {data['name']}")
     await state.clear()
 
 
-# список клубов
 @dp.callback_query(F.data == "clubs")
 async def show_clubs(callback: CallbackQuery):
     clubs = await fetch("SELECT * FROM clubs")
@@ -131,10 +146,7 @@ async def show_clubs(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
 
     for club in clubs:
-        builder.button(
-            text=club["name"],
-            callback_data=f"club_{club['id']}"
-        )
+        builder.button(text=club["name"], callback_data=f"club_{club['id']}")
 
     builder.adjust(1)
 
@@ -142,22 +154,17 @@ async def show_clubs(callback: CallbackQuery):
     await callback.answer()
 
 
-# открыть клуб
 @dp.callback_query(F.data.startswith("club_"))
 async def open_club(callback: CallbackQuery):
     club_id = int(callback.data.split("_")[1])
 
     club = await fetchrow("SELECT * FROM clubs WHERE id = $1", club_id)
 
-    if not club:
-        await callback.answer("Клуб не найден ❌")
-        return
-
     builder = InlineKeyboardBuilder()
     builder.button(text="➕ Вступить", callback_data=f"join_{club_id}")
-    builder.button(text=" ➖ Не вступать", callback_data=f"join_{club_id}")
+    builder.button(text="❌ назад", callback_data=f"clubs")
 
-    builder.adjust(2)
+    builder.adjust(1)
 
     await callback.message.answer(
         f"⛪ {club['name']}\n📝 {club['description']}",
@@ -167,7 +174,6 @@ async def open_club(callback: CallbackQuery):
     await callback.answer()
 
 
-# вступить в клуб
 @dp.callback_query(F.data.startswith("join_"))
 async def join_club(callback: CallbackQuery):
     club_id = int(callback.data.split("_")[1])
@@ -176,43 +182,52 @@ async def join_club(callback: CallbackQuery):
     INSERT INTO club_members (user_id, club_id)
     VALUES ($1, $2)
     ON CONFLICT DO NOTHING
-    """, callback.from_user.id, club_id)
+    """,
+    callback.from_user.id,
+    club_id
+    )
 
     await callback.answer("Ты вступил в клуб ✅")
 
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🧑 Профиль", callback_data="press")
-    builder.button(text="⛪ Смотреть клубы", callback_data="clubs")
-    builder.button(text="⛪ Создать клуб", callback_data="create_club")
-    builder.button(text="👥 Друзья", callback_data="press")
-    builder.button(text="📅 События", callback_data="press")
-    builder.button(text="⚔️ Битвы", callback_data="press")
-    builder.button(text="🏆 Рейтинг", callback_data="press")
-    builder.button(text="🧺 Маркет", callback_data="press")
-    builder.button(text="⚙️ Настройки", callback_data="press")
-    builder.button(text="🎮 Создать ивент", callback_data="create_event")
-    builder.adjust(2)
+    await start_handler(message=callback.message)
 
-    await callback.message.answer("Выбери категорию", reply_markup=builder.as_markup())
 
-# ===== СОБЫТИЯ =====
+# ===== СОЗДАНИЕ СОБЫТИЯ =====
 @dp.callback_query(F.data == "create_event")
 async def create_event_button(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("🎮 Введи игру:")
-    await state.set_state(CreateEvent.game)
+    await callback.message.answer("🔐 Введите пароль админа:")
+    await state.set_state(AdminPassword.password)
     await callback.answer()
+
+
+@dp.message(AdminPassword.password)
+async def check_admin_password(message: Message, state: FSMContext):
+
+    if message.text != ADMIN_PASSWORD:
+        await message.answer("❌ Неверный пароль")
+        await state.clear()
+        return
+
+    await message.answer("✅ Пароль верный\n🎮 Введи игру:")
+    await state.set_state(CreateEvent.game)
 
 
 @dp.message(CreateEvent.game)
 async def event_game(message: Message, state: FSMContext):
     await state.update_data(game=message.text)
-    await message.answer("📅 Введи дату:")
+    await message.answer("📅 Введи дату (25.12.2026 18:30)")
     await state.set_state(CreateEvent.date)
 
 
 @dp.message(CreateEvent.date)
 async def event_date(message: Message, state: FSMContext):
-    await state.update_data(date=message.text)
+    try:
+        event_date = datetime.strptime(message.text, "%d.%m.%Y %H:%M")
+    except ValueError:
+        await message.answer("❌ Неверный формат даты")
+        return
+
+    await state.update_data(date=event_date)
     await message.answer("👥 Сколько игроков?")
     await state.set_state(CreateEvent.players)
 
@@ -232,35 +247,95 @@ async def event_players(message: Message, state: FSMContext):
 async def event_description(message: Message, state: FSMContext):
     data = await state.get_data()
 
-    event = await fetchrow("""
+    await fetchrow("""
     INSERT INTO events (creator_id, game, event_date, max_players, description)
     VALUES ($1, $2, $3, $4, $5)
     RETURNING id
     """,
     message.from_user.id,
     data["game"],
-    data["date"],
+    data["date"].strftime("%d.%m.%Y %H:%M"),
     data["players"],
     message.text
     )
 
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Иду", callback_data=f"go_{event['id']}")
-    builder.button(text="❌ Не иду", callback_data=f"no_{event['id']}")
-    builder.button(text="❓ Под вопросом", callback_data=f"maybe_{event['id']}")
-    builder.adjust(1)
-
     await message.answer(
-        f"🎮 {data['game']}\n📅 {data['date']}\n👥 {data['players']}\n📝 {message.text}",
-        reply_markup=builder.as_markup()
+        f"🎮 {data['game']}\n"
+        f"📅 {data['date'].strftime('%d.%m.%Y %H:%M')}\n"
+        f"👥 {data['players']}\n"
+        f"📝 {message.text}"
     )
 
     await state.clear()
 
 
-# RSVP
+# ===== СПИСОК ИВЕНТОВ =====
+@dp.callback_query(F.data == "events_list")
+async def show_events(callback: CallbackQuery):
+    events = await fetch("SELECT * FROM events ORDER BY id DESC")
+
+    builder = InlineKeyboardBuilder()
+
+    for event in events:
+        builder.button(text=f"🎮 {event['game']}", callback_data=f"event_{event['id']}")
+
+    builder.adjust(1)
+
+    await callback.message.answer("⚔️ Ивенты:", reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("event_"))
+async def open_event(callback: CallbackQuery):
+    event_id = int(callback.data.split("_")[1])
+
+    event = await fetchrow("SELECT * FROM events WHERE id = $1", event_id)
+
+    participants = await fetch("""
+    SELECT users.username, event_participants.status
+    FROM event_participants
+    JOIN users ON users.telegram_id = event_participants.user_id
+    WHERE event_participants.event_id = $1
+    """, event_id)
+
+    going, maybe, no = [], [], []
+
+    for u in participants:
+        text = f"@{u['username'] or 'unknown'}"
+
+        if u["status"] == "going":
+            going.append(text)
+
+        elif u["status"] == "maybe":
+            maybe.append(text)
+
+        else:
+            no.append(text)
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Иду", callback_data=f"go_{event_id}")
+    builder.button(text="❌ Не иду", callback_data=f"no_{event_id}")
+    builder.button(text="❓ Под вопросом", callback_data=f"maybe_{event_id}")
+
+    builder.adjust(1)
+
+    await callback.message.answer(
+        f"🎮 {event['game']}\n"
+        f"📅 {event['event_date']}\n"
+        f"👥 {event['max_players']}\n"
+        f"📝 {event['description']}\n\n"
+        f"✅ Идут:\n{chr(10).join(going) or 'Никого'}\n\n"
+        f"❓ Под вопросом:\n{chr(10).join(maybe) or 'Никого'}\n\n"
+        f"❌ Не идут:\n{chr(10).join(no) or 'Никого'}",
+        reply_markup=builder.as_markup()
+    )
+
+    await callback.answer()
+
+
+# ===== RSVP =====
 @dp.callback_query(F.data.startswith("go_"))
-async def rsvp_go(callback: CallbackQuery):
+async def go(callback: CallbackQuery):
     event_id = int(callback.data.split("_")[1])
 
     await execute("""
@@ -270,11 +345,17 @@ async def rsvp_go(callback: CallbackQuery):
     DO UPDATE SET status = 'going'
     """, event_id, callback.from_user.id)
 
+    await execute("""
+    UPDATE users
+    SET rating = rating + 10
+    WHERE telegram_id = $1
+    """, callback.from_user.id)
+
     await callback.answer("Ты идёшь ✅")
 
 
 @dp.callback_query(F.data.startswith("no_"))
-async def rsvp_no(callback: CallbackQuery):
+async def no(callback: CallbackQuery):
     event_id = int(callback.data.split("_")[1])
 
     await execute("""
@@ -288,7 +369,7 @@ async def rsvp_no(callback: CallbackQuery):
 
 
 @dp.callback_query(F.data.startswith("maybe_"))
-async def rsvp_maybe(callback: CallbackQuery):
+async def maybe(callback: CallbackQuery):
     event_id = int(callback.data.split("_")[1])
 
     await execute("""
@@ -301,30 +382,31 @@ async def rsvp_maybe(callback: CallbackQuery):
     await callback.answer("Под вопросом ❓")
 
 
-# ===== прочее =====
-@dp.message(F.photo)
-async def photo_handler(message: Message):
-    await message.reply("Привет! Я асинхронный бот 🤖")
+# ===== РЕЙТИНГ =====
+@dp.callback_query(F.data == "rating")
+async def show_rating(callback: CallbackQuery):
+
+    users = await fetch("""
+    SELECT *
+    FROM users
+    ORDER BY rating DESC
+    LIMIT 10
+    """)
+
+    text = "🏆 Топ игроков:\n\n"
+
+    for i, user in enumerate(users, start=1):
+        text += f"{i}. @{user['username']} — {user['rating']} очков\n"
+
+    await callback.message.answer(text)
+    await callback.answer()
 
 
-@dp.message(Command("pic"))
-async def send_image(message: Message):
-    photo = FSInputFile("синема.jpg")
-    await message.answer_photo(photo, caption="Вот твоя картинка!")
-
-
-@dp.message()
-async def echo_handler(message: Message):
-    if message.text and message.text.lower() == "привет":
-        await message.answer("Привет! Я асинхронный бот 🤖")
-
-
-# ===== запуск =====
+# ===== RUN =====
 async def main():
     await create_pool()
     await create_tables()
     print("БД подключена и таблицы созданы ✅")
-
     await dp.start_polling(bot)
 
 
