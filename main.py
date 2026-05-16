@@ -26,6 +26,8 @@ class CreateEvent(StatesGroup):
     players = State()
     description = State()
 
+class AddFriend(StatesGroup):
+    username = State()
 
 class CreateClub(StatesGroup):
     name = State()
@@ -58,17 +60,98 @@ async def start_handler(message: Message):
     builder.button(text="🧑 Профиль", callback_data="press")
     builder.button(text="⛪ Смотреть клубы", callback_data="clubs")
     builder.button(text="⛪ Создать клуб", callback_data="create_club")
-    builder.button(text="👥 Друзья", callback_data="press")
+    builder.button(text="👥 Друзья", callback_data="friends")
     builder.button(text="📅 Смотреть события", callback_data="cobity")
     builder.button(text="🏆 Рейтинг", callback_data="rating")
-    builder.button(text="🧺 Маркет", callback_data="press")
     builder.button(text="🎮 Создать событие", callback_data="create_event")
     builder.adjust(2)
 
     await message.answer("Выбери категорию", reply_markup=builder.as_markup())
 
-
 # ===== кнопки =====
+
+@dp.callback_query(F.data == "friends")
+async def friends_menu(callback: CallbackQuery):
+
+    builder = InlineKeyboardBuilder()
+
+    builder.button(text="➕ Добавить друга", callback_data="add_friend")
+    builder.button(text="📋 Мои друзья", callback_data="my_friends")
+    builder.button(text="📨 Заявки", callback_data="friend_requests")
+
+    builder.adjust(1)
+
+    await callback.message.answer(
+        "👥 Меню друзей",
+        reply_markup=builder.as_markup()
+    )
+
+    @dp.callback_query(F.data == "add_friend")
+    async def add_friend_start(callback: CallbackQuery, state: FSMContext):
+        await callback.message.answer(
+            "Введите username друга без @"
+        )
+
+        await state.set_state(AddFriend.username)
+        await callback.answer()
+
+    await callback.answer()
+@dp.callback_query(F.data == "friend_requests")
+async def friend_requests(callback: CallbackQuery):
+
+    requests = await fetch("""
+    SELECT users.username, users.telegram_id
+    FROM friends
+    JOIN users ON users.telegram_id = friends.user_id
+    WHERE friends.friend_id = $1
+    AND friends.status = 'pending'
+    """,
+    callback.from_user.id
+    )
+
+    if not requests:
+        await callback.message.answer("Заявок нет ❌")
+        return
+
+    builder = InlineKeyboardBuilder()
+
+    for user in requests:
+        builder.button(
+            text=f"✅ @{user['username']}",
+            callback_data=f"accept_{user['telegram_id']}"
+        )
+
+    builder.adjust(1)
+
+    await callback.message.answer(
+        "📨 Заявки в друзья:",
+        reply_markup=builder.as_markup()
+    )
+
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("accept_"))
+async def accept_friend(callback: CallbackQuery):
+
+    user_id = int(callback.data.split("_")[1])
+
+    await execute("""
+    UPDATE friends
+    SET status = 'accepted'
+    WHERE user_id = $1
+    AND friend_id = $2
+    """,
+    user_id,
+    callback.from_user.id
+    )
+
+    await callback.answer("Друг добавлен ✅")
+
+    await bot.send_message(
+        user_id,
+        f"👥 @{callback.from_user.username} принял заявку"
+    )
+
 @dp.callback_query(F.data == "press")
 async def press_handler(callback: CallbackQuery):
     await callback.message.answer("Ты нажал кнопку!")
@@ -107,6 +190,7 @@ async def club_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text)
     await message.answer("📝 Введи описание клуба:")
     await state.set_state(CreateClub.description)
+
 
 
 @dp.message(CreateClub.description)
@@ -195,23 +279,10 @@ async def join_club(callback: CallbackQuery):
 
 # ===== СОЗДАНИЕ СОБЫТИЯ =====
 @dp.callback_query(F.data == "create_event")
-async def create_event_button(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("🔐 Введите пароль админа:")
-    await state.set_state(AdminPassword.password)
-    await callback.answer()
-
-
-@dp.message(AdminPassword.password)
-async def check_admin_password(message: Message, state: FSMContext):
-
-    if message.text != ADMIN_PASSWORD:
-        await message.answer("❌ Неверный пароль")
-        await state.clear()
-        return
-
-    await message.answer("✅ Пароль верный\n🎮 Введи игру:")
+async def create_event_start(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("🎮Введи название игры:")
     await state.set_state(CreateEvent.game)
-
+    await callback.answer()
 
 @dp.message(CreateEvent.game)
 async def event_game(message: Message, state: FSMContext):

@@ -67,6 +67,7 @@ async def create_tables():
     );
     """)
 
+
     # EVENTS
     await execute("""
     CREATE TABLE IF NOT EXISTS events (
@@ -107,4 +108,13 @@ async def create_tables():
     );
     """)
 
-    print("Таблицы созданы ✅")
+    await execute("""
+    CREATE TABLE IF NOT EXISTS friends (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL,
+        friend_id BIGINT NOT NULL,
+        status TEXT DEFAULT 'pending',
+
+        UNIQUE(user_id, friend_id)
+    );
+    """)
