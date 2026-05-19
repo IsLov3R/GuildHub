@@ -57,7 +57,7 @@ async def start_handler(message: Message):
         await message.answer("С возвращением 👋")
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="🧑 Профиль", callback_data="press")
+    builder.button(text="🧑 Профиль", callback_data="profile")
     builder.button(text="⛪ Смотреть клубы", callback_data="clubs")
     builder.button(text="⛪ Создать клуб", callback_data="create_club")
     builder.button(text="👥 Друзья", callback_data="friends")
@@ -69,6 +69,7 @@ async def start_handler(message: Message):
     await message.answer("Выбери категорию", reply_markup=builder.as_markup())
 
 # ===== кнопки =====
+
 
 @dp.callback_query(F.data == "friends")
 async def friends_menu(callback: CallbackQuery):
@@ -130,6 +131,34 @@ async def friend_requests(callback: CallbackQuery):
 
     await callback.answer()
 
+@dp.callback_query(F.data == "my_friends")
+async def my_friends(callback: CallbackQuery):
+
+    friends = await fetch("""
+    SELECT users.username
+    FROM friends
+    JOIN users 
+    ON users.telegram_id = friends.friend_id
+    WHERE friends.user_id = $1
+    AND friends.status = 'accepted'
+    """,
+    callback.from_user.id
+    )
+
+
+    if not friends:
+        await callback.message.answer("👥 У тебя пока нет друзей")
+        await callback.answer()
+        return
+
+    text = "👥 Мои друзья:\n\n"
+
+    for friend in friends:
+        text += f"• @{friend['username']}\n"
+
+    await callback.message.answer(text)
+    await callback.answer()
+
 @dp.callback_query(F.data.startswith("accept_"))
 async def accept_friend(callback: CallbackQuery):
 
@@ -151,6 +180,55 @@ async def accept_friend(callback: CallbackQuery):
         user_id,
         f"👥 @{callback.from_user.username} принял заявку"
     )
+
+@dp.message(AddFriend.username)
+async def process_add_friend(message: Message, state: FSMContext):
+
+    username = message.text.replace("@", "")
+
+    friend = await fetchrow(
+        "SELECT * FROM users WHERE username = $1",
+        username
+    )
+
+    if not friend:
+        await message.answer("Пользователь не найден ❌")
+        return
+
+    if friend["telegram_id"] == message.from_user.id:
+        await message.answer("Нельзя добавить себя ❌")
+        return
+
+    # проверяем есть ли уже заявка
+    existing = await fetchrow("""
+    SELECT * FROM friends
+    WHERE user_id = $1 AND friend_id = $2
+    """,
+    message.from_user.id,
+    friend["telegram_id"]
+    )
+
+    if existing:
+        await message.answer("Заявка уже отправлена ❌")
+        return
+
+    # добавляем заявку
+    await execute("""
+    INSERT INTO friends (user_id, friend_id, status)
+    VALUES ($1, $2, 'pending')
+    """,
+    message.from_user.id,
+    friend["telegram_id"]
+    )
+
+    await message.answer(f"Заявка @{username} отправлена ✅")
+
+    await bot.send_message(
+        friend["telegram_id"],
+        f"📨 @{message.from_user.username} отправил тебе заявку в друзья"
+    )
+
+    await state.clear()
 
 @dp.callback_query(F.data == "press")
 async def press_handler(callback: CallbackQuery):
@@ -191,7 +269,46 @@ async def club_name(message: Message, state: FSMContext):
     await message.answer("📝 Введи описание клуба:")
     await state.set_state(CreateClub.description)
 
+@dp.callback_query(F.data == "profile")
+async def press_handler(callback: CallbackQuery):
 
+    user = await fetchrow("""
+    SELECT *
+    FROM users
+    WHERE telegram_id = $1
+    """,
+    callback.from_user.id
+    )
+
+    friends_count = await fetchrow("""
+    SELECT COUNT(*) AS count
+    FROM friends
+    WHERE (
+        user_id = $1
+        OR friend_id = $1
+    )
+    AND status = 'accepted'
+    """,
+    callback.from_user.id
+    )
+
+    clubs_count = await fetchrow("""
+    SELECT COUNT(*) AS count
+    FROM club_members
+    WHERE user_id = $1
+    """,
+    callback.from_user.id
+    )
+
+    await callback.message.answer(
+        f"👤 Профиль\n\n"
+        f"🆔 ID: {user['telegram_id']}\n"
+        f"👤 Username: @{user['username']}\n"
+        f"🏆 Рейтинг: {user['rating']}\n"
+        f"👥 Друзей: {friends_count['count']}\n"
+    )
+
+    await callback.answer()
 
 @dp.message(CreateClub.description)
 async def club_description(message: Message, state: FSMContext):
