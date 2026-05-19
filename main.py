@@ -349,7 +349,7 @@ async def show_clubs(callback: CallbackQuery):
 
     for club in clubs:
         builder.button(text=club["name"], callback_data=f"club_{club['id']}")
-        builder.button(text="❌ назад", callback_data=f"back_start")
+    builder.button(text="❌ назад", callback_data=f"back_start")
     builder.adjust(1)
 
     await callback.message.answer("⛪ Список клубов:", reply_markup=builder.as_markup())
@@ -542,6 +542,8 @@ async def go(callback: CallbackQuery):
 
     await callback.answer("Ты идёшь ✅")
 
+    await start_handler(message=callback.message)
+
 
 @dp.callback_query(F.data.startswith("no_"))
 async def no(callback: CallbackQuery):
@@ -556,6 +558,7 @@ async def no(callback: CallbackQuery):
 
     await callback.answer("Ты не идёшь ❌")
 
+    await start_handler(message=callback.message)
 
 @dp.callback_query(F.data.startswith("maybe_"))
 async def maybe(callback: CallbackQuery):
@@ -570,6 +573,7 @@ async def maybe(callback: CallbackQuery):
 
     await callback.answer("Под вопросом ❓")
 
+    await start_handler(message=callback.message)
 
 # ===== РЕЙТИНГ =====
 @dp.callback_query(F.data == "rating")
