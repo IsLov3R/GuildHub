@@ -39,6 +39,7 @@ async def create_tables():
     # USERS
     await execute("""
     CREATE TABLE IF NOT EXISTS users (
+        ban BOOLEAN NOT NULL DEFAULT FALSE,
         id SERIAL PRIMARY KEY,
         telegram_id BIGINT UNIQUE,
         username TEXT,

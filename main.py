@@ -37,6 +37,8 @@ class CreateClub(StatesGroup):
 class AdminPassword(StatesGroup):
     password = State()
 
+class BanUser(StatesGroup):
+    username = State()
 
 # ===== /start =====
 @dp.message(Command("start"))
@@ -53,12 +55,17 @@ async def start_handler(message: Message):
             message.from_user.username
         )
         await message.answer("Ты зарегистрирован ✅")
+    if user["ban"]:
+        await message.answer("ты забанен увы")
+        return
+
     else:
         await message.answer("С возвращением 👋")
 
     builder = InlineKeyboardBuilder()
     builder.button(text="🧑 Профиль", callback_data="profile")
     builder.button(text="⛪ Смотреть клубы", callback_data="clubs")
+    builder.button(text="👤 меню админа", callback_data="admin_panel")
     builder.button(text="⛪ Создать клуб", callback_data="create_club")
     builder.button(text="👥 Друзья", callback_data="friends")
     builder.button(text="📅 Смотреть события", callback_data="cobity")
@@ -70,6 +77,151 @@ async def start_handler(message: Message):
 
 # ===== кнопки =====
 
+@dp.callback_query(F.data == "admin_panel")
+async def admin_menu(callback: CallbackQuery):
+
+    builder = InlineKeyboardBuilder()
+
+    builder.button(text="🚫 баны", callback_data="bans")
+    builder.button(text="📂 изменить рейтинг", callback_data="edit_reting")
+
+
+    builder.adjust(2)
+    await callback.message.answer(
+        "👤 меню админа",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.callback_query(F.data == "bans")
+async def ban_player(callback: CallbackQuery):
+
+    builder = InlineKeyboardBuilder()
+
+    builder.button(text="🚫 забанить игрока", callback_data="ban_")
+    builder.button(text="🚫 разбанить игрока", callback_data="ban_end")
+
+    builder.adjust(2)
+
+    await callback.message.answer(
+        "баны и разбаны",
+        reply_markup=builder.as_markup()
+    )
+
+
+@dp.callback_query(F.data == "ban_")
+async def ban_menu(callback: CallbackQuery):
+
+    users = await fetch("""
+    SELECT *
+    FROM users
+    ORDER BY username
+    """)
+
+    builder = InlineKeyboardBuilder()
+
+    for user in users:
+
+        builder.button(
+            text=f"🚫 @{user['username']}",
+            callback_data=f"banuser_{user['telegram_id']}"
+        )
+
+    builder.adjust(1)
+
+    await callback.message.answer(
+        "Выбери игрока для бана:",
+        reply_markup=builder.as_markup()
+    )
+
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("banuser_"))
+async def ban_user(callback: CallbackQuery):
+
+    user_id = int(callback.data.split("_")[1])
+
+    await execute("""
+    UPDATE users
+    SET ban = true
+    WHERE telegram_id = $1
+    """,
+    user_id
+    )
+
+    user = await fetchrow("""
+    SELECT *
+    FROM users
+    WHERE telegram_id = $1
+    """,
+    user_id
+    )
+
+    await callback.message.answer(
+        f"🚫 @{user['username']} забанен"
+    )
+
+    await callback.answer("Игрок забанен")
+
+@dp.callback_query(F.data == "ban_end")
+async def unban_menu(callback: CallbackQuery):
+
+    users = await fetch("""
+    SELECT *
+    FROM users
+    WHERE ban = true
+    ORDER BY username
+    """)
+
+    if not users:
+        await callback.message.answer(
+            "Забаненных игроков нет ✅"
+        )
+        return
+
+    builder = InlineKeyboardBuilder()
+
+    for user in users:
+
+        builder.button(
+            text=f"✅ @{user['username']}",
+            callback_data=f"unban_{user['telegram_id']}"
+        )
+
+    builder.adjust(1)
+
+    await callback.message.answer(
+        "Выбери игрока для разбана:",
+        reply_markup=builder.as_markup()
+    )
+
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("unban_"))
+async def unban_user(callback: CallbackQuery):
+
+    user_id = int(callback.data.split("_")[1])
+
+    await execute("""
+    UPDATE users
+    SET ban = false
+    WHERE telegram_id = $1
+    """,
+    user_id
+    )
+
+    user = await fetchrow("""
+    SELECT *
+    FROM users
+    WHERE telegram_id = $1
+    """,
+    user_id
+    )
+
+    await callback.message.answer(
+        f"✅ @{user['username']} разбанен"
+    )
+
+    await callback.answer("Игрок разбанен")
 
 @dp.callback_query(F.data == "friends")
 async def friends_menu(callback: CallbackQuery):
@@ -97,6 +249,7 @@ async def friends_menu(callback: CallbackQuery):
         await callback.answer()
 
     await callback.answer()
+
 @dp.callback_query(F.data == "friend_requests")
 async def friend_requests(callback: CallbackQuery):
 
@@ -131,39 +284,81 @@ async def friend_requests(callback: CallbackQuery):
 
     await callback.answer()
 
+
 @dp.callback_query(F.data == "my_friends")
 async def my_friends(callback: CallbackQuery):
 
     friends = await fetch("""
-    SELECT users.username
+    SELECT users.username, users.telegram_id
     FROM friends
-    JOIN users 
-    ON users.telegram_id = friends.friend_id
+    JOIN users
+    ON users.telegram_id = friends.friend_id 
     WHERE friends.user_id = $1
     AND friends.status = 'accepted'
     """,
     callback.from_user.id
     )
 
-
     if not friends:
         await callback.message.answer("👥 У тебя пока нет друзей")
         await callback.answer()
         return
+
+    builder = InlineKeyboardBuilder()
 
     text = "👥 Мои друзья:\n\n"
 
     for friend in friends:
         text += f"• @{friend['username']}\n"
 
-    await callback.message.answer(text)
+        builder.button(
+            text=f"❌ @{friend['username']}",
+            callback_data=f"delete_friend_{friend['telegram_id']}"
+        )
+
+    builder.adjust(1)
+
+    await callback.message.answer(
+        text,
+        reply_markup=builder.as_markup()
+    )
+
     await callback.answer()
+
+@dp.callback_query(F.data.startswith("delete_friend_"))
+async def delete_friend(callback: CallbackQuery):
+
+    friend_id = int(callback.data.split("_")[2])
+
+    # удаляем дружбу
+    await execute("""
+    DELETE FROM friends
+    WHERE (
+        user_id = $1 AND friend_id = $2
+    )
+    OR (
+        user_id = $2 AND friend_id = $1
+    )
+    """,
+    callback.from_user.id,
+    friend_id
+    )
+
+    await callback.answer("Друг удалён ❌")
+
+    await bot.send_message(
+        friend_id,
+        f"❌ @{callback.from_user.username} удалил тебя из друзей"
+    )
+
+    await callback.message.answer("Друг успешно удалён ✅")
 
 @dp.callback_query(F.data.startswith("accept_"))
 async def accept_friend(callback: CallbackQuery):
 
     user_id = int(callback.data.split("_")[1])
 
+    # обновляем заявку
     await execute("""
     UPDATE friends
     SET status = 'accepted'
@@ -172,6 +367,16 @@ async def accept_friend(callback: CallbackQuery):
     """,
     user_id,
     callback.from_user.id
+    )
+
+    # создаём обратную дружбу
+    await execute("""
+    INSERT INTO friends (user_id, friend_id, status)
+    VALUES ($1, $2, 'accepted')
+    ON CONFLICT DO NOTHING
+    """,
+    callback.from_user.id,
+    user_id
     )
 
     await callback.answer("Друг добавлен ✅")
@@ -365,6 +570,7 @@ async def open_club(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(text="➕ Вступить", callback_data=f"join_{club_id}")
     builder.button(text="❌ назад", callback_data=f"clubs")
+    builder.button(text="🗑️ удалить клуб", callback_data=f"dele_{club_id}")
 
     builder.adjust(1)
 
@@ -393,6 +599,21 @@ async def join_club(callback: CallbackQuery):
 
     await start_handler(message=callback.message)
 
+@dp.callback_query(F.data.startswith("dele_"))
+async def delete_club(callback: CallbackQuery):
+
+    club_id = int(callback.data.split("_")[1])
+
+    await execute("""
+    DELETE FROM clubs
+    WHERE id = $1
+    """,
+    club_id
+                  )
+
+    await callback.answer("клуб удален ❌")
+
+    await start_handler(message=callback.message)
 
 # ===== СОЗДАНИЕ СОБЫТИЯ =====
 @dp.callback_query(F.data == "create_event")
@@ -481,7 +702,7 @@ async def open_event(callback: CallbackQuery):
     event = await fetchrow("SELECT * FROM events WHERE id = $1", event_id)
 
     participants = await fetch("""
-    SELECT users.username, event_participants.status
+    SELECT users.username, event_participants.status, users.rating
     FROM event_participants
     JOIN users ON users.telegram_id = event_participants.user_id
     WHERE event_participants.event_id = $1
@@ -490,7 +711,7 @@ async def open_event(callback: CallbackQuery):
     going, maybe, no = [], [], []
 
     for u in participants:
-        text = f"@{u['username'] or 'unknown'}"
+        text = f"@{u['username'] or 'unknown' } { u['rating']}"
 
         if u["status"] == "going":
             going.append(text)
@@ -505,6 +726,7 @@ async def open_event(callback: CallbackQuery):
     builder.button(text="✅ Иду", callback_data=f"go_{event_id}")
     builder.button(text="❌ Не иду", callback_data=f"no_{event_id}")
     builder.button(text="❓ Под вопросом", callback_data=f"maybe_{event_id}")
+    builder.button(text="🗑️удалить событие", callback_data=f"del_{event_id}")
 
     builder.adjust(1)
 
@@ -520,6 +742,22 @@ async def open_event(callback: CallbackQuery):
     )
 
     await callback.answer()
+
+@dp.callback_query(F.data.startswith("del_"))
+async def delete_cobity(callback: CallbackQuery):
+
+    event_id = int(callback.data.split("_")[1])
+
+    await execute("""
+    DELETE FROM events
+    WHERE id = $1
+    """,
+    event_id
+                  )
+
+    await callback.answer("событие удалено ❌")
+
+    await start_handler(message=callback.message)
 
 
 # ===== RSVP =====
