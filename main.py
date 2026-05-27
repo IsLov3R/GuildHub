@@ -13,7 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from database import create_pool, create_tables, execute, fetchrow, fetch
 
 TOKEN = "8592688032:AAFroY0M7X47fGUMsXH1jqraU8MP4ATxhlQ"
-ADMIN_PASSWORD = "12345"
+ADMIN_PASSWORD = "admin_pass_12"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -33,12 +33,18 @@ class CreateClub(StatesGroup):
     name = State()
     description = State()
 
+class AdminPassword(StatesGroup):
+    password = State()
 
 class AdminPassword(StatesGroup):
     password = State()
 
 class BanUser(StatesGroup):
     username = State()
+
+class EditRating(StatesGroup):
+    user_id = State()
+    amount = State()
 
 # ===== /start =====
 @dp.message(Command("start"))
@@ -78,19 +84,36 @@ async def start_handler(message: Message):
 # ===== кнопки =====
 
 @dp.callback_query(F.data == "admin_panel")
-async def admin_menu(callback: CallbackQuery):
+async def admin_password(callback: CallbackQuery, state: FSMContext):
+
+    await callback.message.answer(
+        "🔐 Введите пароль админа:"
+    )
+
+    await state.set_state(AdminPassword.password)
+
+    await callback.answer()
+
+@dp.message(AdminPassword.password)
+async def check_admin_password(message: Message, state: FSMContext):
+
+    if message.text != ADMIN_PASSWORD:
+        await message.answer("❌ Неверный пароль")
+        return
 
     builder = InlineKeyboardBuilder()
 
     builder.button(text="🚫 баны", callback_data="bans")
     builder.button(text="📂 изменить рейтинг", callback_data="edit_reting")
 
-
     builder.adjust(2)
-    await callback.message.answer(
+
+    await message.answer(
         "👤 меню админа",
         reply_markup=builder.as_markup()
     )
+
+    await state.clear()
 
 @dp.callback_query(F.data == "bans")
 async def ban_player(callback: CallbackQuery):
@@ -107,6 +130,80 @@ async def ban_player(callback: CallbackQuery):
         reply_markup=builder.as_markup()
     )
 
+@dp.callback_query(F.data == "edit_reting")
+async def edit_rating_menu(callback: CallbackQuery):
+
+    users = await fetch("""
+    SELECT *
+    FROM users
+    ORDER BY rating DESC
+    """)
+
+    builder = InlineKeyboardBuilder()
+
+    for user in users:
+        builder.button(
+            text=f"🏆 @{user['username']} ({user['rating']})",
+            callback_data=f"ratinguser_{user['telegram_id']}"
+        )
+
+    builder.adjust(1)
+
+    await callback.message.answer(
+        "Выбери игрока:",
+        reply_markup=builder.as_markup()
+    )
+
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("ratinguser_"))
+async def choose_rating_user(callback: CallbackQuery, state: FSMContext):
+
+    user_id = int(callback.data.split("_")[1])
+
+    await state.update_data(user_id=user_id)
+
+    await callback.message.answer(
+        "Введи новый рейтинг:"
+    )
+
+    await state.set_state(EditRating.amount)
+
+    await callback.answer()
+
+@dp.message(EditRating.amount)
+async def set_new_rating(message: Message, state: FSMContext):
+
+    if not message.text.isdigit():
+        await message.answer("Введите число ❌")
+        return
+
+    data = await state.get_data()
+
+    new_rating = int(message.text)
+
+    await execute("""
+    UPDATE users
+    SET rating = $1
+    WHERE telegram_id = $2
+    """,
+    new_rating,
+    data["user_id"]
+    )
+
+    user = await fetchrow("""
+    SELECT *
+    FROM users
+    WHERE telegram_id = $1
+    """,
+    data["user_id"]
+    )
+
+    await message.answer(
+        f"✅ Рейтинг @{user['username']} изменён на {new_rating}"
+    )
+
+    await state.clear()
 
 @dp.callback_query(F.data == "ban_")
 async def ban_menu(callback: CallbackQuery):
