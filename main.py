@@ -5,19 +5,29 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile, CallbackQuery
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database import create_pool, create_tables, execute, fetchrow, fetch
 
 TOKEN = "8592688032:AAFroY0M7X47fGUMsXH1jqraU8MP4ATxhlQ"
-ADMIN_PASSWORD = "admin_pass_12"
+ADMIN_IDS = [6973391121, 1385280082]
+
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
+def cancel_menu():
+    builder = InlineKeyboardBuilder()
+
+    builder.button(
+        text="❌ Отмена",
+        callback_data="cancel_action"
+    )
+
+    return builder.as_markup()
 
 # ===== FSM =====
 class CreateEvent(StatesGroup):
@@ -49,6 +59,7 @@ class EditRating(StatesGroup):
 # ===== /start =====
 @dp.message(Command("start"))
 async def start_handler(message: Message):
+    print(message.from_user.id)
     user = await fetchrow(
         "SELECT * FROM users WHERE telegram_id = $1",
         message.from_user.id
@@ -86,19 +97,24 @@ async def start_handler(message: Message):
 @dp.callback_query(F.data == "admin_panel")
 async def admin_password(callback: CallbackQuery, state: FSMContext):
 
-    await callback.message.answer(
-        "🔐 Введите пароль админа:"
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
     )
 
-    await state.set_state(AdminPassword.password)
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
 
-    await callback.answer()
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
 
-@dp.message(AdminPassword.password)
-async def check_admin_password(message: Message, state: FSMContext):
-
-    if message.text != ADMIN_PASSWORD:
-        await message.answer("❌ Неверный пароль")
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("❌ вы не являетесь админом", show_alert=True)
         return
 
     builder = InlineKeyboardBuilder()
@@ -108,12 +124,14 @@ async def check_admin_password(message: Message, state: FSMContext):
 
     builder.adjust(2)
 
-    await message.answer(
+    await callback.message.answer(
         "👤 меню админа",
         reply_markup=builder.as_markup()
     )
 
     await state.clear()
+
+    await callback.answer()
 
 @dp.callback_query(F.data == "bans")
 async def ban_player(callback: CallbackQuery):
@@ -235,6 +253,22 @@ async def ban_menu(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("banuser_"))
 async def ban_user(callback: CallbackQuery):
 
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
+
     user_id = int(callback.data.split("_")[1])
 
     await execute("""
@@ -296,6 +330,22 @@ async def unban_menu(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("unban_"))
 async def unban_user(callback: CallbackQuery):
 
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
+
     user_id = int(callback.data.split("_")[1])
 
     await execute("""
@@ -322,6 +372,22 @@ async def unban_user(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "friends")
 async def friends_menu(callback: CallbackQuery):
+
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
 
     builder = InlineKeyboardBuilder()
 
@@ -544,6 +610,23 @@ async def back_to_start(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "cobity")
 async def show_cobity(callback: CallbackQuery):
+
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
+
     events = await fetch("SELECT * FROM events ORDER BY id DESC")
 
     builder = InlineKeyboardBuilder()
@@ -560,7 +643,27 @@ async def show_cobity(callback: CallbackQuery):
 # ===== КЛУБЫ =====
 @dp.callback_query(F.data == "create_club")
 async def create_club_start(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("⛪ Введи название клуба:")
+
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
+
+    await callback.message.answer(
+        "⛪ Введи название клуба:",
+        reply_markup=cancel_menu()
+    )
     await state.set_state(CreateClub.name)
     await callback.answer()
 
@@ -573,6 +676,22 @@ async def club_name(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "profile")
 async def press_handler(callback: CallbackQuery):
+
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
 
     user = await fetchrow("""
     SELECT *
@@ -640,6 +759,23 @@ async def club_description(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "clubs")
 async def show_clubs(callback: CallbackQuery):
+
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
+
     clubs = await fetch("SELECT * FROM clubs")
 
     if not clubs:
@@ -660,6 +796,23 @@ async def show_clubs(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("club_"))
 async def open_club(callback: CallbackQuery):
+
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
+
     club_id = int(callback.data.split("_")[1])
 
     club = await fetchrow("SELECT * FROM clubs WHERE id = $1", club_id)
@@ -699,6 +852,10 @@ async def join_club(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("dele_"))
 async def delete_club(callback: CallbackQuery):
 
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("❌ вы не являетесь админом", show_alert=True)
+        return
+
     club_id = int(callback.data.split("_")[1])
 
     await execute("""
@@ -712,10 +869,39 @@ async def delete_club(callback: CallbackQuery):
 
     await start_handler(message=callback.message)
 
+@dp.callback_query(F.data == "cancel_action")
+async def cancel_action(callback: CallbackQuery, state: FSMContext):
+
+    await state.clear()
+
+    await start_handler(callback.message)
+
+    await callback.answer("Создание отменено ❌")
+
 # ===== СОЗДАНИЕ СОБЫТИЯ =====
 @dp.callback_query(F.data == "create_event")
 async def create_event_start(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("🎮Введи название игры:")
+
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
+
+    await callback.message.answer(
+        "🎮 Введи название игры:",
+        reply_markup=cancel_menu()
+    )
     await state.set_state(CreateEvent.game)
     await callback.answer()
 
@@ -749,7 +935,6 @@ async def event_players(message: Message, state: FSMContext):
     await message.answer("📝 Описание:")
     await state.set_state(CreateEvent.description)
 
-
 @dp.message(CreateEvent.description)
 async def event_description(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -767,6 +952,7 @@ async def event_description(message: Message, state: FSMContext):
     )
 
     await message.answer(
+        f"вы создали событие:\n"
         f"🎮 {data['game']}\n"
         f"📅 {data['date'].strftime('%d.%m.%Y %H:%M')}\n"
         f"👥 {data['players']}\n"
@@ -775,10 +961,28 @@ async def event_description(message: Message, state: FSMContext):
 
     await state.clear()
 
+    await start_handler(message=message)
 
 # ===== СПИСОК ИВЕНТОВ =====
 @dp.callback_query(F.data == "events_list")
 async def show_events(callback: CallbackQuery):
+
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
+
     events = await fetch("SELECT * FROM events ORDER BY id DESC")
 
     builder = InlineKeyboardBuilder()
@@ -794,6 +998,23 @@ async def show_events(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("event_"))
 async def open_event(callback: CallbackQuery):
+
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
+
     event_id = int(callback.data.split("_")[1])
 
     event = await fetchrow("SELECT * FROM events WHERE id = $1", event_id)
@@ -825,6 +1046,16 @@ async def open_event(callback: CallbackQuery):
     builder.button(text="❓ Под вопросом", callback_data=f"maybe_{event_id}")
     builder.button(text="🗑️удалить событие", callback_data=f"del_{event_id}")
 
+    if callback.from_user.id in ADMIN_IDS:
+        builder.button(
+            text="🏆 Выбрать победителя",
+            callback_data=f"winnermenu_{event_id}"
+        )
+    if callback.from_user.id in ADMIN_IDS:
+        builder.button(
+            text="❌ Выбрать проигравшего",
+            callback_data=f"losermenu_{event_id}"
+        )
     builder.adjust(1)
 
     await callback.message.answer(
@@ -840,8 +1071,136 @@ async def open_event(callback: CallbackQuery):
 
     await callback.answer()
 
+@dp.callback_query(F.data.startswith("losermenu_"))
+async def loser_menu(callback: CallbackQuery):
+
+    event_id = int(callback.data.split("_")[1])
+
+    users = await fetch("""
+    SELECT users.telegram_id, users.username
+    FROM event_participants
+    JOIN users
+    ON users.telegram_id = event_participants.user_id
+    WHERE event_participants.event_id = $1
+    AND event_participants.status = 'going'
+    """, event_id)
+
+    builder = InlineKeyboardBuilder()
+
+    for user in users:
+        builder.button(
+            text=f"❌ @{user['username']}",
+            callback_data=f"loser_{user['telegram_id']}"
+        )
+
+    builder.adjust(1)
+
+    await callback.message.answer(
+        "Выберите проигравшего:",
+        reply_markup=builder.as_markup()
+    )
+
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("loser_"))
+async def set_loser(callback: CallbackQuery):
+
+    user_id = int(callback.data.split("_")[1])
+
+    await execute("""
+    UPDATE users
+    SET rating = GREATEST(0, rating - 10)
+    WHERE telegram_id = $1
+    """, user_id)
+
+    user = await fetchrow("""
+    SELECT *
+    FROM users
+    WHERE telegram_id = $1
+    """, user_id)
+
+    await callback.message.answer(
+        f"❌ Проигравший @{user['username']}\n-10 рейтинга"
+    )
+
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("winnermenu_"))
+async def winner_menu(callback: CallbackQuery):
+
+    event_id = int(callback.data.split("_")[1])
+
+    users = await fetch("""
+    SELECT users.telegram_id, users.username
+    FROM event_participants
+    JOIN users
+    ON users.telegram_id = event_participants.user_id
+    WHERE event_participants.event_id = $1
+    AND event_participants.status = 'going'
+    """, event_id)
+
+    builder = InlineKeyboardBuilder()
+
+    for user in users:
+        builder.button(
+            text=f"🏆 @{user['username']}",
+            callback_data=f"winner_{user['telegram_id']}"
+        )
+
+    builder.adjust(1)
+
+    await callback.message.answer(
+        "Выберите победителя:",
+        reply_markup=builder.as_markup()
+    )
+
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("winner_"))
+async def set_winner(callback: CallbackQuery):
+
+    user_id = int(callback.data.split("_")[1])
+
+    await execute("""
+    UPDATE users
+    SET rating = rating + 20
+    WHERE telegram_id = $1
+    """, user_id)
+
+    user = await fetchrow("""
+    SELECT *
+    FROM users
+    WHERE telegram_id = $1
+    """, user_id)
+
+    await callback.message.answer(
+        f"🏆 Победитель @{user['username']}\n+20 рейтинга"
+    )
+
+    await callback.answer()
+
 @dp.callback_query(F.data.startswith("del_"))
 async def delete_cobity(callback: CallbackQuery):
+
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("❌ вы не являетесь админом", show_alert=True)
+        return
+
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("ты забанен увы")
+        return
 
     event_id = int(callback.data.split("_")[1])
 
@@ -868,12 +1227,6 @@ async def go(callback: CallbackQuery):
     ON CONFLICT (event_id, user_id)
     DO UPDATE SET status = 'going'
     """, event_id, callback.from_user.id)
-
-    await execute("""
-    UPDATE users
-    SET rating = rating + 10
-    WHERE telegram_id = $1
-    """, callback.from_user.id)
 
     await callback.answer("Ты идёшь ✅")
 
@@ -913,6 +1266,22 @@ async def maybe(callback: CallbackQuery):
 # ===== РЕЙТИНГ =====
 @dp.callback_query(F.data == "rating")
 async def show_rating(callback: CallbackQuery):
+
+    user = await fetchrow(
+        "SELECT * FROM users WHERE telegram_id = $1",
+        callback.from_user.id
+    )
+
+    if not user:
+        await execute(
+            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
+            callback.from_user.id,
+            callback.from_user.username
+        )
+
+    if user["ban"]:
+        await callback.answer("твой рейтинг равен 0 из за бана")
+        return
 
     users = await fetch("""
     SELECT *
