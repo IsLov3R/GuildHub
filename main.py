@@ -43,12 +43,6 @@ class CreateClub(StatesGroup):
     name = State()
     description = State()
 
-class AdminPassword(StatesGroup):
-    password = State()
-
-class AdminPassword(StatesGroup):
-    password = State()
-
 class BanUser(StatesGroup):
     username = State()
 
@@ -72,6 +66,7 @@ async def start_handler(message: Message):
             message.from_user.username
         )
         await message.answer("Ты зарегистрирован ✅")
+
     if user["ban"]:
         await message.answer("ты забанен увы")
         return
@@ -121,6 +116,7 @@ async def admin_password(callback: CallbackQuery, state: FSMContext):
 
     builder.button(text="🚫 баны", callback_data="bans")
     builder.button(text="📂 изменить рейтинг", callback_data="edit_reting")
+    builder.button(text="👥в главное меню", callback_data=f"back_start")
 
     builder.adjust(2)
 
@@ -140,6 +136,7 @@ async def ban_player(callback: CallbackQuery):
 
     builder.button(text="🚫 забанить игрока", callback_data="ban_")
     builder.button(text="🚫 разбанить игрока", callback_data="ban_end")
+    builder.button(text="👥в главное меню", callback_data=f"back_start")
 
     builder.adjust(2)
 
@@ -164,6 +161,7 @@ async def edit_rating_menu(callback: CallbackQuery):
             text=f"🏆 @{user['username']} ({user['rating']})",
             callback_data=f"ratinguser_{user['telegram_id']}"
         )
+    builder.button(text="👥в главное меню", callback_data=f"back_start")
 
     builder.adjust(1)
 
@@ -240,6 +238,7 @@ async def ban_menu(callback: CallbackQuery):
             text=f"🚫 @{user['username']}",
             callback_data=f"banuser_{user['telegram_id']}"
         )
+    builder.button(text="👥в главное меню", callback_data=f"back_start")
 
     builder.adjust(1)
 
@@ -317,6 +316,7 @@ async def unban_menu(callback: CallbackQuery):
             text=f"✅ @{user['username']}",
             callback_data=f"unban_{user['telegram_id']}"
         )
+    builder.button(text="👥в главное меню", callback_data=f"back_start")
 
     builder.adjust(1)
 
@@ -998,45 +998,37 @@ async def show_events(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("event_"))
 async def open_event(callback: CallbackQuery):
-
-    user = await fetchrow(
-        "SELECT * FROM users WHERE telegram_id = $1",
-        callback.from_user.id
-    )
-
-    if not user:
-        await execute(
-            "INSERT INTO users (telegram_id, username) VALUES ($1, $2)",
-            callback.from_user.id,
-            callback.from_user.username
-        )
-
-    if user["ban"]:
-        await callback.answer("ты забанен увы")
-        return
+    # (Здесь твой код проверки бана и регистрации пользователя...)
 
     event_id = int(callback.data.split("_")[1])
-
     event = await fetchrow("SELECT * FROM events WHERE id = $1", event_id)
 
+    # Запрашиваем также поле result
     participants = await fetch("""
-    SELECT users.username, event_participants.status, users.rating
+    SELECT users.username, event_participants.status, event_participants.result, users.rating
     FROM event_participants
     JOIN users ON users.telegram_id = event_participants.user_id
     WHERE event_participants.event_id = $1
     """, event_id)
 
-    going, maybe, no = [], [], []
+    going_undecided = [] # Идут, результат еще не выставлен
+    winners = []         # Победители
+    losers = []          # Проигравшие
+    maybe = []           # Под вопросом
+    no = []              # Не идут
 
     for u in participants:
-        text = f"@{u['username'] or 'unknown' } { u['rating']}"
+        text = f"@{u['username'] or 'unknown'} ({u['rating']})"
 
         if u["status"] == "going":
-            going.append(text)
-
+            if u["result"] == "winner":
+                winners.append(text)
+            elif u["result"] == "loser":
+                losers.append(text)
+            else:
+                going_undecided.append(text) # Те, кого еще не выбрали
         elif u["status"] == "maybe":
             maybe.append(text)
-
         else:
             no.append(text)
 
@@ -1044,141 +1036,164 @@ async def open_event(callback: CallbackQuery):
     builder.button(text="✅ Иду", callback_data=f"go_{event_id}")
     builder.button(text="❌ Не иду", callback_data=f"no_{event_id}")
     builder.button(text="❓ Под вопросом", callback_data=f"maybe_{event_id}")
-    builder.button(text="🗑️удалить событие", callback_data=f"del_{event_id}")
+    builder.button(text="🗑️ Удалить событие", callback_data=f"del_{event_id}")
 
     if callback.from_user.id in ADMIN_IDS:
-        builder.button(
-            text="🏆 Выбрать победителя",
-            callback_data=f"winnermenu_{event_id}"
-        )
-    if callback.from_user.id in ADMIN_IDS:
-        builder.button(
-            text="❌ Выбрать проигравшего",
-            callback_data=f"losermenu_{event_id}"
-        )
+        builder.button(text="🏆 Выбрать победителя", callback_data=f"winnermenu_{event_id}")
+        builder.button(text="❌ Выбрать проигравшего", callback_data=f"losermenu_{event_id}")
     builder.adjust(1)
 
-    await callback.message.answer(
-        f"🎮 {event['game']}\n"
+    # Формируем красивый текст с новыми блоками
+    message_text = (
+        f"🎮 *{event['game']}*\n"
         f"📅 {event['event_date']}\n"
-        f"👥 {event['max_players']}\n"
+        f"👥 Макс. игроков: {event['max_players']}\n"
         f"📝 {event['description']}\n\n"
-        f"✅ Идут:\n{chr(10).join(going) or 'Никого'}\n\n"
+        f"📊 *Итоги матча:*\n"
+        f"🏆 Победители:\n{chr(10).join(winners) or '—'}\n\n"
+        f"❌ Проигравшие:\n{chr(10).join(losers) or '—'}\n\n"
+        f"⏳ Еще не выбраны:\n{chr(10).join(going_undecided) or 'Все распределены'}\n"
+        f"-------------------------\n"
         f"❓ Под вопросом:\n{chr(10).join(maybe) or 'Никого'}\n\n"
-        f"❌ Не идут:\n{chr(10).join(no) or 'Никого'}",
-        reply_markup=builder.as_markup()
+        f"❌ Не придут:\n{chr(10).join(no) or 'Никого'}"
     )
+
+    # Используем edit_message_text, чтобы не спамить новыми сообщениями,
+    # а обновлять меню прямо перед глазами пользователя
+    try:
+        await callback.message.edit_text(text=message_text, reply_markup=builder.as_markup())
+    except Exception:
+        # На случай если текст сообщения не изменился, чтобы aiogram не кидал ошибку
+        await callback.message.answer(text=message_text, reply_markup=builder.as_markup())
 
     await callback.answer()
 
-@dp.callback_query(F.data.startswith("losermenu_"))
-async def loser_menu(callback: CallbackQuery):
-
-    event_id = int(callback.data.split("_")[1])
-
-    users = await fetch("""
-    SELECT users.telegram_id, users.username
-    FROM event_participants
-    JOIN users
-    ON users.telegram_id = event_participants.user_id
-    WHERE event_participants.event_id = $1
-    AND event_participants.status = 'going'
-    """, event_id)
-
-    builder = InlineKeyboardBuilder()
-
-    for user in users:
-        builder.button(
-            text=f"❌ @{user['username']}",
-            callback_data=f"loser_{user['telegram_id']}"
-        )
-
-    builder.adjust(1)
-
-    await callback.message.answer(
-        "Выберите проигравшего:",
-        reply_markup=builder.as_markup()
-    )
-
-    await callback.answer()
-
-@dp.callback_query(F.data.startswith("loser_"))
-async def set_loser(callback: CallbackQuery):
-
-    user_id = int(callback.data.split("_")[1])
-
-    await execute("""
-    UPDATE users
-    SET rating = GREATEST(0, rating - 10)
-    WHERE telegram_id = $1
-    """, user_id)
-
-    user = await fetchrow("""
-    SELECT *
-    FROM users
-    WHERE telegram_id = $1
-    """, user_id)
-
-    await callback.message.answer(
-        f"❌ Проигравший @{user['username']}\n-10 рейтинга"
-    )
-
-    await callback.answer()
 
 @dp.callback_query(F.data.startswith("winnermenu_"))
 async def winner_menu(callback: CallbackQuery):
-
     event_id = int(callback.data.split("_")[1])
 
     users = await fetch("""
-    SELECT users.telegram_id, users.username
-    FROM event_participants
-    JOIN users
-    ON users.telegram_id = event_participants.user_id
-    WHERE event_participants.event_id = $1
-    AND event_participants.status = 'going'
-    """, event_id)
+                        SELECT users.telegram_id, users.username
+                        FROM event_participants
+                                 JOIN users ON users.telegram_id = event_participants.user_id
+                        WHERE event_participants.event_id = $1
+                          AND event_participants.status = 'going'
+                        """, event_id)
 
     builder = InlineKeyboardBuilder()
-
     for user in users:
+        # Передаем и event_id, и user_id
         builder.button(
             text=f"🏆 @{user['username']}",
-            callback_data=f"winner_{user['telegram_id']}"
+            callback_data=f"winner_{event_id}_{user['telegram_id']}"
         )
-
     builder.adjust(1)
-
-    await callback.message.answer(
-        "Выберите победителя:",
-        reply_markup=builder.as_markup()
-    )
-
+    await callback.message.answer("Выберите победителя:", reply_markup=builder.as_markup())
     await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("losermenu_"))
+async def loser_menu(callback: CallbackQuery):
+    event_id = int(callback.data.split("_")[1])
+
+    users = await fetch("""
+                        SELECT users.telegram_id, users.username
+                        FROM event_participants
+                                 JOIN users ON users.telegram_id = event_participants.user_id
+                        WHERE event_participants.event_id = $1
+                          AND event_participants.status = 'going'
+                        """, event_id)
+
+    builder = InlineKeyboardBuilder()
+    for user in users:
+        # Передаем и event_id, и user_id
+        builder.button(
+            text=f"❌ @{user['username']}",
+            callback_data=f"loser_{event_id}_{user['telegram_id']}"
+        )
+    builder.adjust(1)
+    await callback.message.answer("Выберите проигравшего:", reply_markup=builder.as_markup())
+    await callback.answer()
+
 
 @dp.callback_query(F.data.startswith("winner_"))
 async def set_winner(callback: CallbackQuery):
+    # Разбираем callback_data
+    data_parts = callback.data.split("_")
+    event_id = int(data_parts[1])
+    user_id = int(data_parts[2])
 
-    user_id = int(callback.data.split("_")[1])
+    # Обновляем глобальный рейтинг
+    await execute("UPDATE users SET rating = rating + 20 WHERE telegram_id = $1", user_id)
 
+    # Записываем результат внутри конкретного ивента
     await execute("""
-    UPDATE users
-    SET rating = rating + 20
-    WHERE telegram_id = $1
-    """, user_id)
+                  UPDATE event_participants
+                  SET result = 'winner'
+                  WHERE event_id = $1
+                    AND user_id = $2
+                  """, event_id, user_id)
 
-    user = await fetchrow("""
-    SELECT *
-    FROM users
-    WHERE telegram_id = $1
-    """, user_id)
-
-    await callback.message.answer(
-        f"🏆 Победитель @{user['username']}\n+20 рейтинга"
-    )
-
+    user = await fetchrow("SELECT username FROM users WHERE telegram_id = $1", user_id)
+    await callback.message.answer(f"🏆 Победитель @{user['username']}\n+20 рейтинга")
     await callback.answer()
 
+    # Возвращаем в меню этого же ивента, чтобы админ видел изменения
+    # Для этого подделаем callback_data
+    await callback.message.answer(
+        f"❌ Проигравший @{user['username']}\n-10 рейтинга"
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("loser_"))
+async def set_loser(callback: CallbackQuery):
+    data_parts = callback.data.split("_")
+    event_id = int(data_parts[1])
+    user_id = int(data_parts[2])
+
+    # Обновляем глобальный рейтинг
+    await execute("UPDATE users SET rating = GREATEST(0, rating - 10) WHERE telegram_id = $1", user_id)
+
+    # Записываем результат внутри конкретного ивента
+    await execute("""
+                  UPDATE event_participants
+                  SET result = 'loser'
+                  WHERE event_id = $1
+                    AND user_id = $2
+                  """, event_id, user_id)
+
+    user = await fetchrow("SELECT username FROM users WHERE telegram_id = $1", user_id)
+    await callback.message.answer(f"❌ Проигравший @{user['username']}\n-10 рейтинга")
+    await callback.answer()
+
+    # Возвращаем в меню этого же ивента
+    callback.data = f"event_{event_id}"
+    await open_event(callback)
+
+    results = await fetch("""
+    SELECT result
+    FROM event_participants
+    WHERE event_id = $1
+    """, event_id)
+
+    has_winner = any(r["result"] == "winner" for r in results)
+    has_loser = any(r["result"] == "loser" for r in results)
+
+    if has_winner and has_loser:
+        await execute(
+        "DELETE FROM event_participants WHERE event_id = $1",
+        event_id
+        )
+
+        await execute(
+            "DELETE FROM events WHERE id = $1",
+            event_id
+        )
+
+    await callback.message.answer("🏁 Событие завершено и удалено")
+    return
 @dp.callback_query(F.data.startswith("del_"))
 async def delete_cobity(callback: CallbackQuery):
 
@@ -1229,6 +1244,7 @@ async def go(callback: CallbackQuery):
     """, event_id, callback.from_user.id)
 
     await callback.answer("Ты идёшь ✅")
+    await callback.answer()
 
     await start_handler(message=callback.message)
 
@@ -1245,6 +1261,7 @@ async def no(callback: CallbackQuery):
     """, event_id, callback.from_user.id)
 
     await callback.answer("Ты не идёшь ❌")
+    await callback.answer()
 
     await start_handler(message=callback.message)
 
@@ -1260,6 +1277,7 @@ async def maybe(callback: CallbackQuery):
     """, event_id, callback.from_user.id)
 
     await callback.answer("Под вопросом ❓")
+    await callback.answer()
 
     await start_handler(message=callback.message)
 

@@ -88,7 +88,7 @@ async def create_tables():
         event_id INTEGER,
         user_id BIGINT,
         status TEXT,
-
+        result TEXT DEFAULT 'none',
         UNIQUE(event_id, user_id)
     );
     """)
