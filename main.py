@@ -67,12 +67,14 @@ async def start_handler(message: Message):
         )
         await message.answer("Ты зарегистрирован ✅")
 
+        user = await fetchrow(
+            "SELECT * FROM users WHERE telegram_id = $1",
+            message.from_user.id
+        )
+
     if user["ban"]:
         await message.answer("ты забанен увы")
         return
-
-    else:
-        await message.answer("С возвращением 👋")
 
     builder = InlineKeyboardBuilder()
     builder.button(text="🧑 Профиль", callback_data="profile")
