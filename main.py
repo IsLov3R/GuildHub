@@ -223,6 +223,8 @@ async def set_new_rating(message: Message, state: FSMContext):
 
     await state.clear()
 
+    await start_handler(message=message)
+
 @dp.callback_query(F.data == "ban_")
 async def ban_menu(callback: CallbackQuery):
 
@@ -758,6 +760,7 @@ async def club_description(message: Message, state: FSMContext):
     await message.answer(f"Клуб создан ✅\nНазвание: {data['name']}")
     await state.clear()
 
+    await start_handler(message=message)
 
 @dp.callback_query(F.data == "clubs")
 async def show_clubs(callback: CallbackQuery):
@@ -1078,9 +1081,10 @@ async def winner_menu(callback: CallbackQuery):
     users = await fetch("""
                         SELECT users.telegram_id, users.username
                         FROM event_participants
-                                 JOIN users ON users.telegram_id = event_participants.user_id
+                        JOIN users ON users.telegram_id = event_participants.user_id
                         WHERE event_participants.event_id = $1
-                          AND event_participants.status = 'going'
+                        AND event_participants.status = 'going'
+                        AND event_participants.result IS NULL
                         """, event_id)
 
     builder = InlineKeyboardBuilder()
@@ -1102,9 +1106,10 @@ async def loser_menu(callback: CallbackQuery):
     users = await fetch("""
                         SELECT users.telegram_id, users.username
                         FROM event_participants
-                                 JOIN users ON users.telegram_id = event_participants.user_id
+                        JOIN users ON users.telegram_id = event_participants.user_id
                         WHERE event_participants.event_id = $1
-                          AND event_participants.status = 'going'
+                        AND event_participants.status = 'going'
+                        AND event_participants.result IS NULL
                         """, event_id)
 
     builder = InlineKeyboardBuilder()
@@ -1141,13 +1146,8 @@ async def set_winner(callback: CallbackQuery):
     await callback.message.answer(f"🏆 Победитель @{user['username']}\n+20 рейтинга")
     await callback.answer()
 
-    # Возвращаем в меню этого же ивента, чтобы админ видел изменения
-    # Для этого подделаем callback_data
-    await callback.message.answer(
-        f"❌ Проигравший @{user['username']}\n-10 рейтинга"
-    )
-    await callback.answer()
-
+    callback.data = f"event_{event_id}"
+    await open_event(callback)
 
 @dp.callback_query(F.data.startswith("loser_"))
 async def set_loser(callback: CallbackQuery):
