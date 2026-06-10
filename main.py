@@ -1084,7 +1084,7 @@ async def winner_menu(callback: CallbackQuery):
                         JOIN users ON users.telegram_id = event_participants.user_id
                         WHERE event_participants.event_id = $1
                         AND event_participants.status = 'going'
-                        AND event_participants.result IS NULL
+                        AND event_participants.result = 'none'
                         """, event_id)
 
     builder = InlineKeyboardBuilder()
@@ -1109,7 +1109,7 @@ async def loser_menu(callback: CallbackQuery):
                         JOIN users ON users.telegram_id = event_participants.user_id
                         WHERE event_participants.event_id = $1
                         AND event_participants.status = 'going'
-                        AND event_participants.result IS NULL
+                        AND event_participants.result = 'none'
                         """, event_id)
 
     builder = InlineKeyboardBuilder()
@@ -1126,7 +1126,6 @@ async def loser_menu(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("winner_"))
 async def set_winner(callback: CallbackQuery):
-    # Разбираем callback_data
     data_parts = callback.data.split("_")
     event_id = int(data_parts[1])
     user_id = int(data_parts[2])
@@ -1148,6 +1147,7 @@ async def set_winner(callback: CallbackQuery):
 
     callback.data = f"event_{event_id}"
     await open_event(callback)
+
 
 @dp.callback_query(F.data.startswith("loser_"))
 async def set_loser(callback: CallbackQuery):
@@ -1174,28 +1174,6 @@ async def set_loser(callback: CallbackQuery):
     callback.data = f"event_{event_id}"
     await open_event(callback)
 
-    results = await fetch("""
-    SELECT result
-    FROM event_participants
-    WHERE event_id = $1
-    """, event_id)
-
-    has_winner = any(r["result"] == "winner" for r in results)
-    has_loser = any(r["result"] == "loser" for r in results)
-
-    if has_winner and has_loser:
-        await execute(
-        "DELETE FROM event_participants WHERE event_id = $1",
-        event_id
-        )
-
-        await execute(
-            "DELETE FROM events WHERE id = $1",
-            event_id
-        )
-
-    await callback.message.answer("🏁 Событие завершено и удалено")
-    return
 @dp.callback_query(F.data.startswith("del_"))
 async def delete_cobity(callback: CallbackQuery):
 
