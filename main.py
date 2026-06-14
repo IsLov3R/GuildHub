@@ -1263,7 +1263,7 @@ async def maybe(callback: CallbackQuery):
 
 # ===== РЕЙТИНГ =====
 @dp.callback_query(F.data == "rating")
-async def show_rating(callback: CallbackQuery):
+async def  show_rating(callback: CallbackQuery):
 
     user = await fetchrow(
         "SELECT * FROM users WHERE telegram_id = $1",
@@ -1295,7 +1295,10 @@ async def show_rating(callback: CallbackQuery):
 
     await callback.message.answer(text)
     await callback.answer()
+    reply_markup = cancel_menu()
 
+    await callback.message.answer("вернуться в главное меню :", reply_markup=reply_markup)
+    await callback.answer()
 
 # ===== RUN =====
 async def main():
