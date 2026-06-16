@@ -23,7 +23,7 @@ def cancel_menu():
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="❌ Отмена",
+        text="❌ вернуться",
         callback_data="cancel_action"
     )
 
@@ -479,9 +479,11 @@ async def my_friends(callback: CallbackQuery):
         text += f"• @{friend['username']}\n"
 
         builder.button(
-            text=f"❌ @{friend['username']}",
+            text=f"❌удалить  @{friend['username']}",
             callback_data=f"delete_friend_{friend['telegram_id']}"
         )
+
+    builder.button(text="👥в главное меню", callback_data=f"back_start")
 
     builder.adjust(1)
 
@@ -822,15 +824,29 @@ async def open_club(callback: CallbackQuery):
 
     club = await fetchrow("SELECT * FROM clubs WHERE id = $1", club_id)
 
+    members = await fetch("""
+    SELECT users.username
+    FROM club_members
+    JOIN users
+    ON users.telegram_id = club_members.user_id
+    WHERE club_members.club_id = $1
+    """, club_id)
+
+    members_text = "\n".join(
+        f"• @{m['username']}" for m in members
+    ) or "Нет участников"
+
     builder = InlineKeyboardBuilder()
     builder.button(text="➕ Вступить", callback_data=f"join_{club_id}")
-    builder.button(text="❌ назад", callback_data=f"clubs")
+    builder.button(text="❌ назад", callback_data="clubs")
     builder.button(text="🗑️ удалить клуб", callback_data=f"dele_{club_id}")
-
     builder.adjust(1)
 
     await callback.message.answer(
-        f"⛪ {club['name']}\n📝 {club['description']}",
+        f"⛪ {club['name']}\n"
+        f"📝 {club['description']}\n\n"
+        f"👥 Участников: {len(members)}\n\n"
+        f"{members_text}",
         reply_markup=builder.as_markup()
     )
 
@@ -1145,10 +1161,6 @@ async def set_winner(callback: CallbackQuery):
     await callback.message.answer(f"🏆 Победитель @{user['username']}\n+20 рейтинга")
     await callback.answer()
 
-    callback.data = f"event_{event_id}"
-    await open_event(callback)
-
-
 @dp.callback_query(F.data.startswith("loser_"))
 async def set_loser(callback: CallbackQuery):
     data_parts = callback.data.split("_")
@@ -1169,10 +1181,6 @@ async def set_loser(callback: CallbackQuery):
     user = await fetchrow("SELECT username FROM users WHERE telegram_id = $1", user_id)
     await callback.message.answer(f"❌ Проигравший @{user['username']}\n-10 рейтинга")
     await callback.answer()
-
-    # Возвращаем в меню этого же ивента
-    callback.data = f"event_{event_id}"
-    await open_event(callback)
 
 @dp.callback_query(F.data.startswith("del_"))
 async def delete_cobity(callback: CallbackQuery):
