@@ -406,14 +406,14 @@ async def friends_menu(callback: CallbackQuery):
         reply_markup=builder.as_markup()
     )
 
-    @dp.callback_query(F.data == "add_friend")
-    async def add_friend_start(callback: CallbackQuery, state: FSMContext):
-        await callback.message.answer(
-            "Введите username друга без @"
-        )
+@dp.callback_query(F.data == "add_friend")
+async def add_friend_start(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer(
+        "Введите username друга без @"
+    )
 
-        await state.set_state(AddFriend.username)
-        await callback.answer()
+    await state.set_state(AddFriend.username)
+    await callback.answer()
 
     await callback.answer()
 
@@ -1224,6 +1224,26 @@ async def delete_cobity(callback: CallbackQuery):
 async def go(callback: CallbackQuery):
     event_id = int(callback.data.split("_")[1])
 
+    event = await fetchrow("""
+    SELECT max_players
+    FROM events
+    WHERE id = $1
+    """, event_id)
+
+    players_count = await fetchrow("""
+    SELECT COUNT(*) AS count
+    FROM event_participants
+    WHERE event_id = $1
+    AND status = 'going'
+    """, event_id)
+
+    if players_count["count"] >= event["max_players"]:
+        await callback.answer(
+            "❌ Мест больше нет",
+            show_alert=True
+        )
+        return
+
     await execute("""
     INSERT INTO event_participants (event_id, user_id, status)
     VALUES ($1, $2, 'going')
@@ -1232,9 +1252,6 @@ async def go(callback: CallbackQuery):
     """, event_id, callback.from_user.id)
 
     await callback.answer("Ты идёшь ✅")
-    await callback.answer()
-
-    await start_handler(message=callback.message)
 
 
 @dp.callback_query(F.data.startswith("no_"))
