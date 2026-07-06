@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile, CallbackQuery
@@ -1114,6 +1115,53 @@ async def winner_menu(callback: CallbackQuery):
     await callback.message.answer("Выберите победителя:", reply_markup=builder.as_markup())
     await callback.answer()
 
+async def check_event_reminders():
+    while True:
+        now = datetime.now()
+
+        events = await fetch("""
+        SELECT *
+        FROM events
+        WHERE reminder_sent = FALSE
+        """)
+
+        for event in events:
+            event_time = datetime.strptime(
+                event["event_date"],
+                "%d.%m.%Y %H:%M"
+            )
+
+            # осталось 30 минут или меньше
+            if now >= event_time - timedelta(minutes=30):
+
+                participants = await fetch("""
+                SELECT user_id
+                FROM event_participants
+                WHERE event_id = $1
+                AND status = 'going'
+                """, event["id"])
+
+                for player in participants:
+                    try:
+                        await bot.send_message(
+                            player["user_id"],
+                            f"⏰ Напоминание!\n\n"
+                            f"Через 30 минут начинается событие:\n"
+                            f"🎮 {event['game']}\n"
+                            f"📅 {event['event_date']}"
+                        )
+                    except:
+                        pass
+
+                # чтобы повторно не отправилось
+                await execute("""
+                UPDATE events
+                SET reminder_sent = TRUE
+                WHERE id = $1
+                """, event["id"])
+
+        await asyncio.sleep(60)
+
 
 @dp.callback_query(F.data.startswith("losermenu_"))
 async def loser_menu(callback: CallbackQuery):
@@ -1252,7 +1300,9 @@ async def go(callback: CallbackQuery):
     """, event_id, callback.from_user.id)
 
     await callback.answer("Ты идёшь ✅")
+    await callback.answer()
 
+    await start_handler(message=callback.message)
 
 @dp.callback_query(F.data.startswith("no_"))
 async def no(callback: CallbackQuery):
@@ -1329,6 +1379,9 @@ async def  show_rating(callback: CallbackQuery):
 async def main():
     await create_pool()
     await create_tables()
+
+    asyncio.create_task(check_event_reminders())
+
     print("БД подключена и таблицы созданы ✅")
     await dp.start_polling(bot)
 

@@ -68,17 +68,22 @@ async def create_tables():
     );
     """)
 
-
-    # EVENTS
     await execute("""
     CREATE TABLE IF NOT EXISTS events (
+
         id SERIAL PRIMARY KEY,
         creator_id BIGINT,
         game TEXT,
         event_date TEXT,
         max_players INTEGER,
-        description TEXT
+        description TEXT,
+        reminder_sent BOOLEAN DEFAULT FALSE
     );
+    """)
+
+    await execute("""
+    ALTER TABLE events
+    ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE;
     """)
 
     # EVENT PARTICIPANTS
@@ -89,6 +94,7 @@ async def create_tables():
         user_id BIGINT,
         status TEXT,
         result TEXT DEFAULT 'none',
+
         UNIQUE(event_id, user_id)
     );
     """)
@@ -109,6 +115,7 @@ async def create_tables():
     );
     """)
 
+    # FRIENDS
     await execute("""
     CREATE TABLE IF NOT EXISTS friends (
         id SERIAL PRIMARY KEY,
